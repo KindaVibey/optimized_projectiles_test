@@ -1,0 +1,10 @@
+{
+  "variants": {
+    "facing=north": { "model": "testgunmod:block/gun_turret" },
+    "facing=south": { "model": "testgunmod:block/gun_turret", "y": 180 },
+    "facing=west": { "model": "testgunmod:block/gun_turret", "y": 270 },
+    "facing=east": { "model": "testgunmod:block/gun_turret", "y": 90 },
+    "facing=up": { "model": "testgunmod:block/gun_turret", "x": 270 },
+    "facing=down": { "model": "testgunmod:block/gun_turret", "x": 90 }
+  }
+}

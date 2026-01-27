@@ -1,0 +1,8 @@
+{
+  "parent": "block/orientable",
+  "textures": {
+    "top": "testgunmod:block/gun_turret_top",
+    "front": "testgunmod:block/gun_turret_front",
+    "side": "testgunmod:block/gun_turret_side"
+  }
+}
