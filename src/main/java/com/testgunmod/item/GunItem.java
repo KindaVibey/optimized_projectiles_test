@@ -26,11 +26,12 @@ public class GunItem extends Item {
             // Get player's look direction
             Vec3 lookVec = player.getLookAngle();
 
-            // Create bullet velocity (4 blocks per tick)
-            Vec3 velocity = lookVec.scale(4.0);
+            // Create bullet velocity (2.5 blocks per tick - realistic bullet speed)
+            Vec3 velocity = lookVec.scale(2.5);
 
-            // Spawn bullet from player's eye position
-            Vec3 spawnPos = player.getEyePosition(1.0f);
+            // Spawn bullet slightly in front of player's eye to avoid self-collision
+            Vec3 eyePos = player.getEyePosition(1.0f);
+            Vec3 spawnPos = eyePos.add(lookVec.scale(0.5)); // 0.5 blocks in front
 
             BulletEntity bullet = new BulletEntity(
                     ModEntityTypes.BULLET.get(),

@@ -29,6 +29,11 @@ public class BulletEntity extends Entity {
     private int ticksAlive = 0;
     private boolean hasHit = false;
 
+    // Physics constants for realistic ballistics
+    private static final double AIR_DRAG = 0.99; // Air resistance coefficient
+    private static final double GRAVITY = 0.015; // Reduced gravity for more realistic arc
+    private static final double MIN_VELOCITY = 0.01; // Much lower minimum velocity before despawn
+
     public BulletEntity(EntityType<?> type, Level level) {
         super(type, level);
         this.noCulling = false;
@@ -54,22 +59,25 @@ public class BulletEntity extends Entity {
 
         ticksAlive++;
 
-        // Despawn after 5 seconds or if already hit
-        if (ticksAlive > 100 || hasHit) {
+        // Despawn after 30 seconds or if already hit (user requested 30 seconds)
+        if (ticksAlive > 600 || hasHit) {
             this.discard();
             return;
         }
 
-        // Server-side collision
+        // Apply physics (server-side collision, client-side prediction)
+        Vec3 motion = this.getDeltaMovement();
+
         if (!this.level().isClientSide) {
+            // Server: Check collisions and apply physics
             checkCollisions();
+            this.setDeltaMovement(motion.x * AIR_DRAG, motion.y - GRAVITY, motion.z * AIR_DRAG);
+        } else {
+            // Client: Predict physics locally for smooth movement
+            this.setDeltaMovement(motion.x * AIR_DRAG, motion.y - GRAVITY, motion.z * AIR_DRAG);
         }
 
-        // Apply gravity
-        Vec3 motion = this.getDeltaMovement();
-        this.setDeltaMovement(motion.x, motion.y - 0.03, motion.z);
-
-        // Update position
+        // Update position with current velocity
         this.setPos(this.getX() + motion.x, this.getY() + motion.y, this.getZ() + motion.z);
 
         // Update rotation to match velocity
@@ -79,40 +87,50 @@ public class BulletEntity extends Entity {
     private void checkCollisions() {
         Vec3 currentPos = this.position();
         Vec3 motion = this.getDeltaMovement();
-        Vec3 nextPos = currentPos.add(motion);
 
-        // Block collision
-        BlockHitResult blockHit = this.level().clip(new ClipContext(
-                currentPos, nextPos,
-                ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE,
-                this
-        ));
+        // For fast-moving bullets, check collision in smaller steps
+        int steps = Math.max(1, (int) Math.ceil(motion.length() * 2)); // More steps for faster bullets
 
-        if (blockHit.getType() != HitResult.Type.MISS) {
-            hasHit = true;
-            this.discard();
-            return;
-        }
+        for (int i = 0; i < steps; i++) {
+            double stepProgress = (double) i / steps;
+            double nextStepProgress = (double) (i + 1) / steps;
 
-        // Entity collision
-        AABB searchBox = this.getBoundingBox().expandTowards(motion).inflate(0.5);
-        List<Entity> entities = this.level().getEntities(this, searchBox,
-                e -> e.isAlive() && e.isPickable() && !(e instanceof BulletEntity));
+            Vec3 stepStart = currentPos.add(motion.scale(stepProgress));
+            Vec3 stepEnd = currentPos.add(motion.scale(nextStepProgress));
 
-        for (Entity target : entities) {
-            AABB targetBox = target.getBoundingBox().inflate(0.3);
-            Vec3 hit = targetBox.clip(currentPos, nextPos).orElse(null);
+            // Block collision for this step
+            BlockHitResult blockHit = this.level().clip(new ClipContext(
+                    stepStart, stepEnd,
+                    ClipContext.Block.COLLIDER,
+                    ClipContext.Fluid.NONE,
+                    this
+            ));
 
-            if (hit != null) {
-                // Hit entity
-                float damage = this.entityData.get(DATA_DAMAGE);
-                DamageSource source = this.damageSources().mobProjectile(this, null);
-                target.hurt(source, damage);
-
+            if (blockHit.getType() != HitResult.Type.MISS) {
                 hasHit = true;
                 this.discard();
                 return;
+            }
+
+            // Entity collision for this step - larger search area for fast bullets
+            AABB searchBox = new AABB(stepStart, stepEnd).inflate(0.8);
+            List<Entity> entities = this.level().getEntities(this, searchBox,
+                    e -> e.isAlive() && e.isPickable() && !(e instanceof BulletEntity));
+
+            for (Entity target : entities) {
+                AABB targetBox = target.getBoundingBox().inflate(0.1); // Smaller inflation for precision
+                Vec3 hit = targetBox.clip(stepStart, stepEnd).orElse(null);
+
+                if (hit != null) {
+                    // Hit entity
+                    float damage = this.entityData.get(DATA_DAMAGE);
+                    DamageSource source = this.damageSources().mobProjectile(this, null);
+                    target.hurt(source, damage);
+
+                    hasHit = true;
+                    this.discard();
+                    return;
+                }
             }
         }
     }
