@@ -39,15 +39,31 @@ public class BulletRenderer extends EntityRenderer<BulletEntity> {
         Vec3 velocity = entity.getDeltaMovement();
 
         // Calculate rotation angles to align bullet with velocity
-        float pitch = -((float)(Mth.atan2(velocity.y, velocity.horizontalDistance()) * (180.0 / Math.PI)));
-        float yaw = (float)(Mth.atan2(velocity.x, velocity.z) * (180.0 / Math.PI));
+        float pitch;
+        float yaw;
+        
+        // Handle vertical shots specially to avoid division by zero
+        double horizontalDist = velocity.horizontalDistance();
+        if (horizontalDist < 0.001) {
+            // Near vertical shot - set pitch directly
+            if (velocity.y > 0) {
+                pitch = 90.0f;  // Straight up
+            } else {
+                pitch = -90.0f; // Straight down
+            }
+            yaw = 0.0f; // No yaw for vertical shots
+        } else {
+            // Normal case - calculate using atan2
+            pitch = -((float)(Mth.atan2(velocity.y, horizontalDist) * (180.0 / Math.PI)));
+            yaw = (float)(Mth.atan2(velocity.x, velocity.z) * (180.0 / Math.PI));
+        }
 
         // Apply rotations to align bullet with flight path
-        poseStack.mulPose(Axis.YP.rotationDegrees(yaw - 90.0f));
-        poseStack.mulPose(Axis.ZP.rotationDegrees(pitch));
-
-        // Scale the model to appropriate size
-        poseStack.scale(0.08f, 0.08f, 0.08f);
+        // Add a small local-space Y offset (1px) before rotating so horizontal shots align
+        // This offset rotates with the bullet, preserving vertical alignment.
+        poseStack.translate(0.0D, 1.0D / 16.0D, 0.0D);
+        poseStack.mulPose(Axis.YP.rotationDegrees(yaw));
+        poseStack.mulPose(Axis.XP.rotationDegrees(pitch));
 
         // Render the model
         VertexConsumer vertexConsumer = buffer.getBuffer(RenderType.entityCutout(TEXTURE));

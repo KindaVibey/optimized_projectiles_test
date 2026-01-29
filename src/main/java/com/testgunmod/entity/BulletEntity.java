@@ -39,10 +39,10 @@ public class BulletEntity extends Entity {
     private static final double GRAVITY = 0.015;
 
     // Collision constants (server only)
-    private static final double COLLISION_MARGIN = 0.25;
+    private static final double COLLISION_MARGIN = 0.10;
 
     // Lifetime
-    private static final int MAX_LIFETIME_TICKS = 100; // 5 seconds
+    private static final int MAX_LIFETIME_TICKS = 1200; // 60 seconds
 
     // Culling distance
     private static final double MAX_RENDER_DISTANCE_SQ = 64.0 * 64.0;
@@ -79,13 +79,23 @@ public class BulletEntity extends Entity {
         Vec3 motion = this.getDeltaMovement();
 
         // Early exit if motion is negligible
-        if (motion.lengthSqr() < 0.01) {
-            this.discard();
-            return;
-        }
+//        if (motion.lengthSqr() < 0.01) {
+//            this.discard();
+//            return;
+//        }
 
+        // Apply physics BEFORE calculating next position
         Vec3 currentPos = this.position();
-        Vec3 nextPos = currentPos.add(motion);
+        
+        // Apply physics (gravity and drag) to get new velocity
+        Vec3 newMotion = new Vec3(
+                motion.x * AIR_DRAG,
+                motion.y - GRAVITY,
+                motion.z * AIR_DRAG
+        );
+        
+        // Calculate next position using the physics-modified velocity
+        Vec3 nextPos = currentPos.add(newMotion);
 
         // SERVER-SIDE: Full collision detection
         if (!this.level().isClientSide) {
@@ -137,12 +147,7 @@ public class BulletEntity extends Entity {
         // This runs every tick on client for smooth visual movement
         // Server corrections will snap position if needed (rare)
 
-        // Apply physics BEFORE moving (same on both sides)
-        Vec3 newMotion = new Vec3(
-                motion.x * AIR_DRAG,
-                motion.y - GRAVITY,
-                motion.z * AIR_DRAG
-        );
+        // Update velocity with physics (already calculated above)
         this.setDeltaMovement(newMotion);
 
         // Move bullet (happens on both client and server every tick)
