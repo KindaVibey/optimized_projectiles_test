@@ -18,10 +18,9 @@ public class ModEntityTypes {
                             BulletEntity::new,
                             MobCategory.MISC
                     )
-                    .sized(0.1f, 0.1f)         // Reduced from 0.15f for better performance
-                    .clientTrackingRange(8)    // Increased to 8 chunks for long-range bullets
-                    .updateInterval(20)  // Reasonable updates every 20 ticks for sync
-                    .setShouldReceiveVelocityUpdates(true)   // Enable velocity sync for client prediction
+                    .sized(0.1f, 0.1f)
+                    .updateInterval(20)
+                    .setShouldReceiveVelocityUpdates(true)
                     .fireImmune()
                     .build("bullet"));
 

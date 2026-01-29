@@ -11,7 +11,6 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.*;
@@ -19,7 +18,7 @@ import net.minecraft.world.phys.*;
 import java.util.List;
 
 /**
- * Optimized bullet entity - smooth physics, high performance
+ * Optimized bullet entity with no distance-based despawning
  */
 public class BulletEntity extends Entity {
 
@@ -29,14 +28,15 @@ public class BulletEntity extends Entity {
     private int ticksAlive = 0;
     private boolean hasHit = false;
 
-    // Physics constants for realistic ballistics
-    private static final double AIR_DRAG = 0.99; // Air resistance coefficient
-    private static final double GRAVITY = 0.015; // Reduced gravity for more realistic arc
-    private static final double MIN_VELOCITY = 0.01; // Much lower minimum velocity before despawn
+    // Physics constants
+    private static final double AIR_DRAG = 0.99;
+    private static final double GRAVITY = 0.015;
+    private static final double COLLISION_INFLATE = 0.8;
+    private static final double TARGET_INFLATE = 0.1;
 
     public BulletEntity(EntityType<?> type, Level level) {
         super(type, level);
-        this.noCulling = false;
+        this.noCulling = true; // CHANGED: Prevent culling-based removal
     }
 
     public BulletEntity(EntityType<?> type, Level level, Vec3 position, Vec3 velocity, float damage) {
@@ -45,7 +45,7 @@ public class BulletEntity extends Entity {
         this.setDeltaMovement(velocity);
         this.updateRotation();
         this.entityData.set(DATA_DAMAGE, damage);
-        this.setNoGravity(true); // We handle gravity manually
+        this.setNoGravity(true);
     }
 
     @Override
@@ -59,28 +59,24 @@ public class BulletEntity extends Entity {
 
         ticksAlive++;
 
-        // Despawn after 30 seconds or if already hit (user requested 30 seconds)
+        // Only despawn after 30 seconds or on hit
         if (ticksAlive > 600 || hasHit) {
             this.discard();
             return;
         }
 
-        // Apply physics (server-side collision, client-side prediction)
         Vec3 motion = this.getDeltaMovement();
 
         if (!this.level().isClientSide) {
-            // Server: Check collisions and apply physics
             checkCollisions();
-            this.setDeltaMovement(motion.x * AIR_DRAG, motion.y - GRAVITY, motion.z * AIR_DRAG);
-        } else {
-            // Client: Predict physics locally for smooth movement
-            this.setDeltaMovement(motion.x * AIR_DRAG, motion.y - GRAVITY, motion.z * AIR_DRAG);
         }
 
-        // Update position with current velocity
+        // Move with current velocity
         this.setPos(this.getX() + motion.x, this.getY() + motion.y, this.getZ() + motion.z);
 
-        // Update rotation to match velocity
+        // Apply physics for next tick
+        this.setDeltaMovement(motion.x * AIR_DRAG, motion.y - GRAVITY, motion.z * AIR_DRAG);
+
         this.updateRotation();
     }
 
@@ -88,8 +84,8 @@ public class BulletEntity extends Entity {
         Vec3 currentPos = this.position();
         Vec3 motion = this.getDeltaMovement();
 
-        // For fast-moving bullets, check collision in smaller steps
-        int steps = Math.max(1, (int) Math.ceil(motion.length() * 2)); // More steps for faster bullets
+        double motionLength = motion.length();
+        int steps = Math.max(1, (int) Math.ceil(motionLength * 2));
 
         for (int i = 0; i < steps; i++) {
             double stepProgress = (double) i / steps;
@@ -98,7 +94,6 @@ public class BulletEntity extends Entity {
             Vec3 stepStart = currentPos.add(motion.scale(stepProgress));
             Vec3 stepEnd = currentPos.add(motion.scale(nextStepProgress));
 
-            // Block collision for this step
             BlockHitResult blockHit = this.level().clip(new ClipContext(
                     stepStart, stepEnd,
                     ClipContext.Block.COLLIDER,
@@ -108,27 +103,24 @@ public class BulletEntity extends Entity {
 
             if (blockHit.getType() != HitResult.Type.MISS) {
                 hasHit = true;
-                this.discard();
                 return;
             }
 
-            // Entity collision for this step - larger search area for fast bullets
-            AABB searchBox = new AABB(stepStart, stepEnd).inflate(0.8);
+            AABB searchBox = new AABB(stepStart, stepEnd).inflate(COLLISION_INFLATE);
+
             List<Entity> entities = this.level().getEntities(this, searchBox,
                     e -> e.isAlive() && e.isPickable() && !(e instanceof BulletEntity));
 
             for (Entity target : entities) {
-                AABB targetBox = target.getBoundingBox().inflate(0.1); // Smaller inflation for precision
+                AABB targetBox = target.getBoundingBox().inflate(TARGET_INFLATE);
                 Vec3 hit = targetBox.clip(stepStart, stepEnd).orElse(null);
 
                 if (hit != null) {
-                    // Hit entity
                     float damage = this.entityData.get(DATA_DAMAGE);
                     DamageSource source = this.damageSources().mobProjectile(this, null);
                     target.hurt(source, damage);
 
                     hasHit = true;
-                    this.discard();
                     return;
                 }
             }
@@ -144,6 +136,17 @@ public class BulletEntity extends Entity {
 
         this.yRotO = this.getYRot();
         this.xRotO = this.getXRot();
+    }
+
+    @Override
+    public void checkDespawn() {
+        // Override to prevent any distance-based despawning
+    }
+
+    // Force the entity to always be considered "in range" for tracking
+    @Override
+    public boolean shouldRenderAtSqrDistance(double pDistance) {
+        return true; // Always render regardless of distance
     }
 
     @Override
@@ -179,10 +182,14 @@ public class BulletEntity extends Entity {
     @Override
     protected void readAdditionalSaveData(CompoundTag tag) {
         this.ticksAlive = tag.getInt("Age");
+        if (tag.contains("Damage")) {
+            this.entityData.set(DATA_DAMAGE, tag.getFloat("Damage"));
+        }
     }
 
     @Override
     protected void addAdditionalSaveData(CompoundTag tag) {
         tag.putInt("Age", this.ticksAlive);
+        tag.putFloat("Damage", this.entityData.get(DATA_DAMAGE));
     }
 }
