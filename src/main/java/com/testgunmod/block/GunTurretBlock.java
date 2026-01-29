@@ -21,6 +21,11 @@ public class GunTurretBlock extends Block {
 
     public static final DirectionProperty FACING = DirectionalBlock.FACING;
 
+    // EVERY TICK FIRING for maximum stress testing
+    // This will spawn 20 bullets per second per turret
+    // With 9 turrets = 180 bullets/second
+    private static final int FIRE_RATE_TICKS = 1;
+
     public GunTurretBlock(Properties properties) {
         super(properties);
         this.registerDefaultState(this.stateDefinition.any().setValue(FACING, Direction.NORTH));
@@ -42,8 +47,8 @@ public class GunTurretBlock extends Block {
 
         if (!level.isClientSide) {
             if (level.hasNeighborSignal(pos)) {
-                // Start ticking
-                level.scheduleTick(pos, this, 1);
+                // Start ticking immediately
+                level.scheduleTick(pos, this, FIRE_RATE_TICKS);
             }
         }
     }
@@ -53,12 +58,10 @@ public class GunTurretBlock extends Block {
         if (level.hasNeighborSignal(pos)) {
             shootBullet(level, pos, state);
 
-            // Schedule next shot (10 ticks = 0.5 seconds)
-            level.scheduleTick(pos, this, 1);
+            // Schedule next shot immediately (every tick)
+            level.scheduleTick(pos, this, FIRE_RATE_TICKS);
         }
     }
-
-
 
     private void shootBullet(Level level, BlockPos pos, BlockState state) {
         Direction facing = state.getValue(FACING);
@@ -88,7 +91,7 @@ public class GunTurretBlock extends Block {
 
         level.addFreshEntity(bullet);
 
-        // Play sound
+        // Play sound (can comment out for even better performance)
         level.playSound(null, pos, SoundEvents.GENERIC_EXPLODE,
                 SoundSource.BLOCKS, 0.5f, 1.5f);
     }
