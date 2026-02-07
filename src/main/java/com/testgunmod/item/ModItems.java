@@ -14,11 +14,9 @@ public class ModItems {
     public static final DeferredRegister<Item> ITEMS =
             DeferredRegister.create(ForgeRegistries.ITEMS, TestGunMod.MOD_ID);
 
-    // Gun item
     public static final RegistryObject<Item> GUN = ITEMS.register("gun",
             () -> new GunItem(new Item.Properties()));
 
-    // Gun turret block item
     public static final RegistryObject<Item> GUN_TURRET = ITEMS.register("gun_turret",
             () -> new BlockItem(ModBlocks.GUN_TURRET.get(), new Item.Properties()));
 

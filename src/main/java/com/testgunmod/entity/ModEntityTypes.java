@@ -19,7 +19,7 @@ public class ModEntityTypes {
                             MobCategory.MISC
                     )
                     .sized(0.1f, 0.1f)
-                    .updateInterval(20) // Update every 5 ticks (0.25 seconds) for network efficiency
+                    .updateInterval(20)
                     .setShouldReceiveVelocityUpdates(true)
                     .fireImmune()
                     .build("bullet"));

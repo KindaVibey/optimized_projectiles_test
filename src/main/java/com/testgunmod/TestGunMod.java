@@ -14,7 +14,6 @@ public class TestGunMod {
     public TestGunMod() {
         IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
 
-        // Register everything
         ModEntityTypes.register(modEventBus);
         ModItems.register(modEventBus);
         ModBlocks.register(modEventBus);

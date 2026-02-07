@@ -17,34 +17,21 @@ import net.minecraft.world.phys.*;
 
 import java.util.List;
 
-/**
- * Ultra-optimized bullet entity with CLIENT-SIDE PHYSICS PREDICTION
- *
- * Physics run on BOTH client and server:
- * - Server: Full collision detection and authority
- * - Client: Physics prediction for smooth visual movement
- *
- * This prevents teleporting/stuttering even with reduced network updates
- */
 public class BulletEntity extends Entity {
 
     private static final EntityDataAccessor<Float> DATA_DAMAGE =
             SynchedEntityData.defineId(BulletEntity.class, EntityDataSerializers.FLOAT);
 
     private int ticksAlive = 0;
-    private AABB cachedSearchBox; // Cache to avoid recreating every tick
+    private AABB cachedSearchBox;
 
-    // Physics constants - MUST BE SAME ON CLIENT AND SERVER
     private static final double AIR_DRAG = 0.99;
     private static final double GRAVITY = 0.015;
 
-    // Collision constants (server only)
     private static final double COLLISION_MARGIN = 0.25;
 
-    // Lifetime
     private static final int MAX_LIFETIME_TICKS = 100; // 5 seconds
 
-    // Culling distance
     private static final double MAX_RENDER_DISTANCE_SQ = 64.0 * 64.0;
 
     public BulletEntity(EntityType<?> type, Level level) {
@@ -58,7 +45,7 @@ public class BulletEntity extends Entity {
         this.setDeltaMovement(velocity);
         this.updateRotation();
         this.entityData.set(DATA_DAMAGE, damage);
-        this.setNoGravity(true); // We handle gravity manually
+        this.setNoGravity(true);
     }
 
     @Override
@@ -70,7 +57,6 @@ public class BulletEntity extends Entity {
     public void tick() {
         super.tick();
 
-        // Quick despawn check
         if (++ticksAlive > MAX_LIFETIME_TICKS) {
             this.discard();
             return;
@@ -78,7 +64,6 @@ public class BulletEntity extends Entity {
 
         Vec3 motion = this.getDeltaMovement();
 
-        // Early exit if motion is negligible
         if (motion.lengthSqr() < 0.01) {
             this.discard();
             return;
@@ -87,9 +72,7 @@ public class BulletEntity extends Entity {
         Vec3 currentPos = this.position();
         Vec3 nextPos = currentPos.add(motion);
 
-        // SERVER-SIDE: Full collision detection
         if (!this.level().isClientSide) {
-            // Single block raytrace
             BlockHitResult blockHit = this.level().clip(new ClipContext(
                     currentPos, nextPos,
                     ClipContext.Block.COLLIDER,
@@ -102,11 +85,9 @@ public class BulletEntity extends Entity {
                 return;
             }
 
-            // Reuse cached AABB or create new one
             if (cachedSearchBox == null) {
                 cachedSearchBox = new AABB(currentPos, nextPos).inflate(COLLISION_MARGIN);
             } else {
-                // Update existing AABB (faster than creating new)
                 double minX = Math.min(currentPos.x, nextPos.x) - COLLISION_MARGIN;
                 double minY = Math.min(currentPos.y, nextPos.y) - COLLISION_MARGIN;
                 double minZ = Math.min(currentPos.z, nextPos.z) - COLLISION_MARGIN;
@@ -116,15 +97,12 @@ public class BulletEntity extends Entity {
                 cachedSearchBox = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
             }
 
-            // Single entity query with minimal predicate
             List<Entity> entities = this.level().getEntities(this, cachedSearchBox,
                     e -> e.isAlive() && e.isPickable());
 
-            // Check only first entity (fastest)
             if (!entities.isEmpty()) {
                 Entity target = entities.get(0);
 
-                // Quick AABB intersection test
                 if (cachedSearchBox.intersects(target.getBoundingBox())) {
                     float damage = this.entityData.get(DATA_DAMAGE);
                     target.hurt(this.damageSources().mobProjectile(this, null), damage);
@@ -133,11 +111,6 @@ public class BulletEntity extends Entity {
                 }
             }
         }
-        // CLIENT-SIDE: Physics prediction only (no collision)
-        // This runs every tick on client for smooth visual movement
-        // Server corrections will snap position if needed (rare)
-
-        // Apply physics BEFORE moving (same on both sides)
         Vec3 newMotion = new Vec3(
                 motion.x * AIR_DRAG,
                 motion.y - GRAVITY,
@@ -145,10 +118,8 @@ public class BulletEntity extends Entity {
         );
         this.setDeltaMovement(newMotion);
 
-        // Move bullet (happens on both client and server every tick)
         this.setPos(nextPos.x, nextPos.y, nextPos.z);
 
-        // Update rotation for rendering
         this.updateRotation();
     }
 
@@ -156,8 +127,7 @@ public class BulletEntity extends Entity {
         Vec3 motion = this.getDeltaMovement();
         double horizontalDist = motion.horizontalDistance();
 
-        if (horizontalDist > 0.001) { // Avoid division by zero
-            // Inlined constants for performance: 180/PI = 57.2957795
+        if (horizontalDist > 0.001) {
             this.setYRot((float)(Mth.atan2(motion.x, motion.z) * 57.2957795));
             this.setXRot((float)(Mth.atan2(motion.y, horizontalDist) * 57.2957795));
 
@@ -168,7 +138,7 @@ public class BulletEntity extends Entity {
 
     @Override
     public void checkDespawn() {
-        // Override to prevent distance-based despawning
+
     }
 
     @Override

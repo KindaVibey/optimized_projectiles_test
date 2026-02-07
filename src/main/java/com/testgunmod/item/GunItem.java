@@ -23,34 +23,28 @@ public class GunItem extends Item {
         ItemStack itemStack = player.getItemInHand(hand);
 
         if (!level.isClientSide) {
-            // Get player's look direction
             Vec3 lookVec = player.getLookAngle();
 
-            // Create bullet velocity (2.5 blocks per tick - realistic bullet speed)
             Vec3 velocity = lookVec.scale(2.5);
 
-            // Spawn bullet slightly in front of player's eye to avoid self-collision
             Vec3 eyePos = player.getEyePosition(1.0f);
-            Vec3 spawnPos = eyePos.add(lookVec.scale(0.5)); // 0.5 blocks in front
+            Vec3 spawnPos = eyePos.add(lookVec.scale(0.5));
 
             BulletEntity bullet = new BulletEntity(
                     ModEntityTypes.BULLET.get(),
                     level,
                     spawnPos,
                     velocity,
-                    10.0f // damage
+                    10.0f
             );
 
             level.addFreshEntity(bullet);
 
-            // Play sound
             level.playSound(null, player.getX(), player.getY(), player.getZ(),
                     SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 0.5f, 1.5f);
 
-            // Add cooldown (half second)
             player.getCooldowns().addCooldown(this, 10);
 
-            // Damage item
             itemStack.hurtAndBreak(1, player, (p) -> p.broadcastBreakEvent(hand));
         }
 
