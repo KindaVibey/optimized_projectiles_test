@@ -84,18 +84,10 @@ public class BulletEntity extends Entity {
 //            return;
 //        }
 
-        // Apply physics BEFORE calculating next position
         Vec3 currentPos = this.position();
 
-        // Apply physics (gravity and drag) to get new velocity
-        Vec3 newMotion = new Vec3(
-                motion.x * AIR_DRAG,
-                motion.y - GRAVITY,
-                motion.z * AIR_DRAG
-        );
-
-        // Calculate next position using the physics-modified velocity
-        Vec3 nextPos = currentPos.add(newMotion);
+        // Calculate next position using CURRENT velocity (before physics modification)
+        Vec3 nextPos = currentPos.add(motion);
 
         // SERVER-SIDE: Full collision detection
         if (!this.level().isClientSide) {
@@ -147,11 +139,16 @@ public class BulletEntity extends Entity {
         // This runs every tick on client for smooth visual movement
         // Server corrections will snap position if needed (rare)
 
-        // Update velocity with physics (already calculated above)
-        this.setDeltaMovement(newMotion);
-
-        // Move bullet (happens on both client and server every tick)
+        // Move bullet FIRST with current velocity (happens on both client and server)
         this.setPos(nextPos.x, nextPos.y, nextPos.z);
+
+        // THEN apply physics for NEXT tick's velocity
+        Vec3 newMotion = new Vec3(
+                motion.x * AIR_DRAG,
+                motion.y - GRAVITY,
+                motion.z * AIR_DRAG
+        );
+        this.setDeltaMovement(newMotion);
 
         // Update rotation for rendering
         this.updateRotation();
@@ -184,6 +181,18 @@ public class BulletEntity extends Entity {
     @Override
     public Packet<ClientGamePacketListener> getAddEntityPacket() {
         return new ClientboundAddEntityPacket(this);
+    }
+
+    @Override
+    public void recreateFromPacket(ClientboundAddEntityPacket packet) {
+        super.recreateFromPacket(packet);
+        // CRITICAL: Ensure velocity is properly synchronized on spawn
+        // Without this, client might not receive initial velocity correctly
+        double vx = packet.getXa();
+        double vy = packet.getYa();
+        double vz = packet.getZa();
+        this.setDeltaMovement(vx, vy, vz);
+        this.updateRotation();
     }
 
     @Override
