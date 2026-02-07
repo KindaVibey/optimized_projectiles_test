@@ -20,19 +20,23 @@ import java.util.List;
 /**
  * Ultra-optimized bullet entity with CLIENT-SIDE PHYSICS PREDICTION
  *
- * Physics run on BOTH client and server:
- * - Server: Full collision detection and authority
- * - Client: Physics prediction for smooth visual movement
- *
- * This prevents teleporting/stuttering even with reduced network updates
+ * Physics run on BOTH client and server with IDENTICAL code.
+ * No desyncs because client spawns with server's exact initial state.
  */
 public class BulletEntity extends Entity {
 
     private static final EntityDataAccessor<Float> DATA_DAMAGE =
             SynchedEntityData.defineId(BulletEntity.class, EntityDataSerializers.FLOAT);
 
+    // SYNC AGE SO CLIENT KNOWS IF IT MISSED TICKS
+    private static final EntityDataAccessor<Integer> DATA_AGE =
+            SynchedEntityData.defineId(BulletEntity.class, EntityDataSerializers.INT);
+
     private int ticksAlive = 0;
-    private AABB cachedSearchBox; // Cache to avoid recreating every tick
+    private AABB cachedSearchBox;
+
+    // Track if this is the first tick after spawning on client
+    private boolean firstClientTick = false;
 
     // Physics constants - MUST BE SAME ON CLIENT AND SERVER
     private static final double AIR_DRAG = 0.99;
@@ -43,9 +47,6 @@ public class BulletEntity extends Entity {
 
     // Lifetime
     private static final int MAX_LIFETIME_TICKS = 1200; // 60 seconds
-
-    // Culling distance
-    private static final double MAX_RENDER_DISTANCE_SQ = 64.0 * 64.0;
 
     public BulletEntity(EntityType<?> type, Level level) {
         super(type, level);
@@ -58,17 +59,28 @@ public class BulletEntity extends Entity {
         this.setDeltaMovement(velocity);
         this.updateRotation();
         this.entityData.set(DATA_DAMAGE, damage);
-        this.setNoGravity(true); // We handle gravity manually
+        this.entityData.set(DATA_AGE, 0);
+        this.setNoGravity(true);
     }
 
     @Override
     protected void defineSynchedData() {
         this.entityData.define(DATA_DAMAGE, 10.0f);
+        this.entityData.define(DATA_AGE, 0);
     }
 
     @Override
     public void tick() {
         super.tick();
+
+        // CLIENT: On first tick after receiving spawn packet, don't run physics yet
+        // The position/velocity we received is ALREADY after server ran physics
+        if (this.level().isClientSide && firstClientTick) {
+            firstClientTick = false;
+            ticksAlive++;
+            this.entityData.set(DATA_AGE, ticksAlive);
+            return; // Skip physics this tick - we're already at the correct position
+        }
 
         // Quick despawn check
         if (++ticksAlive > MAX_LIFETIME_TICKS) {
@@ -76,14 +88,12 @@ public class BulletEntity extends Entity {
             return;
         }
 
+        // Sync age to clients
+        if (!this.level().isClientSide) {
+            this.entityData.set(DATA_AGE, ticksAlive);
+        }
+
         Vec3 motion = this.getDeltaMovement();
-
-        // Early exit if motion is negligible
-//        if (motion.lengthSqr() < 0.01) {
-//            this.discard();
-//            return;
-//        }
-
         Vec3 currentPos = this.position();
 
         // Calculate next position using CURRENT velocity (before physics modification)
@@ -136,10 +146,8 @@ public class BulletEntity extends Entity {
             }
         }
         // CLIENT-SIDE: Physics prediction only (no collision)
-        // This runs every tick on client for smooth visual movement
-        // Server corrections will snap position if needed (rare)
 
-        // Move bullet FIRST with current velocity (happens on both client and server)
+        // Move bullet FIRST with current velocity
         this.setPos(nextPos.x, nextPos.y, nextPos.z);
 
         // THEN apply physics for NEXT tick's velocity
@@ -158,7 +166,7 @@ public class BulletEntity extends Entity {
         Vec3 motion = this.getDeltaMovement();
         double horizontalDist = motion.horizontalDistance();
 
-        if (horizontalDist > 0.001) { // Avoid division by zero
+        if (horizontalDist > 0.001) {
             // Inlined constants for performance: 180/PI = 57.2957795
             this.setYRot((float)(Mth.atan2(motion.x, motion.z) * 57.2957795));
             this.setXRot((float)(Mth.atan2(motion.y, horizontalDist) * 57.2957795));
@@ -186,13 +194,20 @@ public class BulletEntity extends Entity {
     @Override
     public void recreateFromPacket(ClientboundAddEntityPacket packet) {
         super.recreateFromPacket(packet);
-        // CRITICAL: Ensure velocity is properly synchronized on spawn
-        // Without this, client might not receive initial velocity correctly
+
+        // Set velocity from packet
         double vx = packet.getXa();
         double vy = packet.getYa();
         double vz = packet.getZa();
         this.setDeltaMovement(vx, vy, vz);
         this.updateRotation();
+
+        // CRITICAL: Mark that we just spawned on client
+        // On the very first tick, we should NOT run physics because
+        // the position we received has ALREADY had physics applied server-side
+        if (this.level().isClientSide) {
+            this.firstClientTick = true;
+        }
     }
 
     @Override
@@ -233,6 +248,4 @@ public class BulletEntity extends Entity {
         tag.putInt("Age", this.ticksAlive);
         tag.putFloat("Damage", this.entityData.get(DATA_DAMAGE));
     }
-
-
 }

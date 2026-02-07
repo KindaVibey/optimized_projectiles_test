@@ -28,7 +28,7 @@ public class GunItem extends Item {
             Vec3 velocity = lookVec.scale(2.5);
 
             Vec3 eyePos = player.getEyePosition(1.0f);
-            Vec3 spawnPos = eyePos.add(lookVec.scale(0.5));
+            Vec3 spawnPos = eyePos.add(lookVec.scale(1.0f));
 
             BulletEntity bullet = new BulletEntity(
                     ModEntityTypes.BULLET.get(),

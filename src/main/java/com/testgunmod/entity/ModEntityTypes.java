@@ -19,7 +19,7 @@ public class ModEntityTypes {
                             MobCategory.MISC
                     )
                     .sized(0.1f, 0.1f)
-                    .updateInterval(20)
+                    .updateInterval(10)
                     .setShouldReceiveVelocityUpdates(true)  // CRITICAL: Don't continue moving during updates
                     .fireImmune()
                     .build("bullet"));
