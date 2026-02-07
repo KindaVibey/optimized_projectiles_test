@@ -20,7 +20,7 @@ public class ModEntityTypes {
                     )
                     .sized(0.1f, 0.1f)
                     .updateInterval(20)
-                    .setShouldReceiveVelocityUpdates(true)
+                    .setShouldReceiveVelocityUpdates(true)  // CRITICAL: Don't continue moving during updates
                     .fireImmune()
                     .build("bullet"));
 
