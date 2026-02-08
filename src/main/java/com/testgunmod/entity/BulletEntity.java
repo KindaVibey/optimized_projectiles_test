@@ -17,36 +17,25 @@ import net.minecraft.world.phys.*;
 
 import java.util.List;
 
-/**
- * Ultra-optimized bullet entity with CLIENT-SIDE PHYSICS PREDICTION
- *
- * Physics run on BOTH client and server with IDENTICAL code.
- * No desyncs because client spawns with server's exact initial state.
- */
 public class BulletEntity extends Entity {
 
     private static final EntityDataAccessor<Float> DATA_DAMAGE =
             SynchedEntityData.defineId(BulletEntity.class, EntityDataSerializers.FLOAT);
 
-    // SYNC AGE SO CLIENT KNOWS IF IT MISSED TICKS
     private static final EntityDataAccessor<Integer> DATA_AGE =
             SynchedEntityData.defineId(BulletEntity.class, EntityDataSerializers.INT);
 
     private int ticksAlive = 0;
     private AABB cachedSearchBox;
 
-    // Track if this is the first tick after spawning on client
     private boolean firstClientTick = false;
 
-    // Physics constants - MUST BE SAME ON CLIENT AND SERVER
     private static final double AIR_DRAG = 0.99;
     private static final double GRAVITY = 0.015;
 
-    // Collision constants (server only)
     private static final double COLLISION_MARGIN = 0.10;
 
-    // Lifetime
-    private static final int MAX_LIFETIME_TICKS = 1200; // 60 seconds
+    private static final int MAX_LIFETIME_TICKS = 1200;
 
     public BulletEntity(EntityType<?> type, Level level) {
         super(type, level);
@@ -73,22 +62,18 @@ public class BulletEntity extends Entity {
     public void tick() {
         super.tick();
 
-        // CLIENT: On first tick after receiving spawn packet, don't run physics yet
-        // The position/velocity we received is ALREADY after server ran physics
         if (this.level().isClientSide && firstClientTick) {
             firstClientTick = false;
             ticksAlive++;
             this.entityData.set(DATA_AGE, ticksAlive);
-            return; // Skip physics this tick - we're already at the correct position
+            return;
         }
 
-        // Quick despawn check
         if (++ticksAlive > MAX_LIFETIME_TICKS) {
             this.discard();
             return;
         }
 
-        // Sync age to clients
         if (!this.level().isClientSide) {
             this.entityData.set(DATA_AGE, ticksAlive);
         }
@@ -96,12 +81,9 @@ public class BulletEntity extends Entity {
         Vec3 motion = this.getDeltaMovement();
         Vec3 currentPos = this.position();
 
-        // Calculate next position using CURRENT velocity (before physics modification)
         Vec3 nextPos = currentPos.add(motion);
 
-        // SERVER-SIDE: Full collision detection
         if (!this.level().isClientSide) {
-            // Single block raytrace
             BlockHitResult blockHit = this.level().clip(new ClipContext(
                     currentPos, nextPos,
                     ClipContext.Block.COLLIDER,
@@ -114,11 +96,9 @@ public class BulletEntity extends Entity {
                 return;
             }
 
-            // Reuse cached AABB or create new one
             if (cachedSearchBox == null) {
                 cachedSearchBox = new AABB(currentPos, nextPos).inflate(COLLISION_MARGIN);
             } else {
-                // Update existing AABB (faster than creating new)
                 double minX = Math.min(currentPos.x, nextPos.x) - COLLISION_MARGIN;
                 double minY = Math.min(currentPos.y, nextPos.y) - COLLISION_MARGIN;
                 double minZ = Math.min(currentPos.z, nextPos.z) - COLLISION_MARGIN;
@@ -128,15 +108,12 @@ public class BulletEntity extends Entity {
                 cachedSearchBox = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
             }
 
-            // Single entity query with minimal predicate
             List<Entity> entities = this.level().getEntities(this, cachedSearchBox,
                     e -> e.isAlive() && e.isPickable());
 
-            // Check only first entity (fastest)
             if (!entities.isEmpty()) {
                 Entity target = entities.get(0);
 
-                // Quick AABB intersection test
                 if (cachedSearchBox.intersects(target.getBoundingBox())) {
                     float damage = this.entityData.get(DATA_DAMAGE);
                     target.hurt(this.damageSources().mobProjectile(this, null), damage);
@@ -145,12 +122,9 @@ public class BulletEntity extends Entity {
                 }
             }
         }
-        // CLIENT-SIDE: Physics prediction only (no collision)
 
-        // Move bullet FIRST with current velocity
         this.setPos(nextPos.x, nextPos.y, nextPos.z);
 
-        // THEN apply physics for NEXT tick's velocity
         Vec3 newMotion = new Vec3(
                 motion.x * AIR_DRAG,
                 motion.y - GRAVITY,
@@ -158,7 +132,6 @@ public class BulletEntity extends Entity {
         );
         this.setDeltaMovement(newMotion);
 
-        // Update rotation for rendering
         this.updateRotation();
     }
 
@@ -167,7 +140,6 @@ public class BulletEntity extends Entity {
         double horizontalDist = motion.horizontalDistance();
 
         if (horizontalDist > 0.001) {
-            // Inlined constants for performance: 180/PI = 57.2957795
             this.setYRot((float)(Mth.atan2(motion.x, motion.z) * 57.2957795));
             this.setXRot((float)(Mth.atan2(motion.y, horizontalDist) * 57.2957795));
 
@@ -178,7 +150,6 @@ public class BulletEntity extends Entity {
 
     @Override
     public void checkDespawn() {
-        // Override to prevent distance-based despawning
     }
 
     @Override
@@ -195,16 +166,12 @@ public class BulletEntity extends Entity {
     public void recreateFromPacket(ClientboundAddEntityPacket packet) {
         super.recreateFromPacket(packet);
 
-        // Set velocity from packet
         double vx = packet.getXa();
         double vy = packet.getYa();
         double vz = packet.getZa();
         this.setDeltaMovement(vx, vy, vz);
         this.updateRotation();
 
-        // CRITICAL: Mark that we just spawned on client
-        // On the very first tick, we should NOT run physics because
-        // the position we received has ALREADY had physics applied server-side
         if (this.level().isClientSide) {
             this.firstClientTick = true;
         }
