@@ -8,16 +8,19 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.util.Mth;
-import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityDimensions;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.*;
+import net.minecraft.world.entity.projectile.AbstractArrow;
 
 import java.util.List;
 
-public class BulletEntity extends Entity {
+public class BulletEntity extends AbstractArrow {
 
     private static final EntityDataAccessor<Float> DATA_DAMAGE =
             SynchedEntityData.defineId(BulletEntity.class, EntityDataSerializers.FLOAT);
@@ -38,7 +41,7 @@ public class BulletEntity extends Entity {
     private static final int MAX_LIFETIME_TICKS = 1200;
 
     public BulletEntity(EntityType<?> type, Level level) {
-        super(type, level);
+        super((EntityType<? extends AbstractArrow>) type, level);
         this.noCulling = true;
     }
 
@@ -46,7 +49,7 @@ public class BulletEntity extends Entity {
         this(type, level);
         this.setPos(position.x, position.y, position.z);
         this.setDeltaMovement(velocity);
-        this.updateRotation();
+        this.updateRotationFromVelocity();
         this.entityData.set(DATA_DAMAGE, damage);
         this.entityData.set(DATA_AGE, 0);
         this.setNoGravity(true);
@@ -54,13 +57,17 @@ public class BulletEntity extends Entity {
 
     @Override
     protected void defineSynchedData() {
+        // Must call super to register AbstractArrow's ID_FLAGS and PIERCE_LEVEL,
+        // otherwise the game will crash on SynchedEntityData access
+        super.defineSynchedData();
         this.entityData.define(DATA_DAMAGE, 10.0f);
         this.entityData.define(DATA_AGE, 0);
     }
 
     @Override
     public void tick() {
-        super.tick();
+        // Skip straight to baseTick — bypasses AbstractArrow and Projectile logic entirely
+        this.baseTick();
 
         if (this.level().isClientSide && firstClientTick) {
             firstClientTick = false;
@@ -80,7 +87,6 @@ public class BulletEntity extends Entity {
 
         Vec3 motion = this.getDeltaMovement();
         Vec3 currentPos = this.position();
-
         Vec3 nextPos = currentPos.add(motion);
 
         if (!this.level().isClientSide) {
@@ -132,10 +138,16 @@ public class BulletEntity extends Entity {
         );
         this.setDeltaMovement(newMotion);
 
-        this.updateRotation();
+        this.updateRotationFromVelocity();
     }
 
-    private void updateRotation() {
+    // AbstractArrow requires this — return empty since bullets aren't picked up
+    @Override
+    protected ItemStack getPickupItem() {
+        return ItemStack.EMPTY;
+    }
+
+    private void updateRotationFromVelocity() {
         Vec3 motion = this.getDeltaMovement();
         double horizontalDist = motion.horizontalDistance();
 
@@ -170,7 +182,7 @@ public class BulletEntity extends Entity {
         double vy = packet.getYa();
         double vz = packet.getZa();
         this.setDeltaMovement(vx, vy, vz);
-        this.updateRotation();
+        this.updateRotationFromVelocity();
 
         if (this.level().isClientSide) {
             this.firstClientTick = true;
@@ -198,12 +210,13 @@ public class BulletEntity extends Entity {
     }
 
     @Override
-    protected float getEyeHeight(net.minecraft.world.entity.Pose pose, net.minecraft.world.entity.EntityDimensions dimensions) {
+    protected float getEyeHeight(Pose pose, EntityDimensions dimensions) {
         return 0.0f;
     }
 
     @Override
-    protected void readAdditionalSaveData(CompoundTag tag) {
+    public void readAdditionalSaveData(CompoundTag tag) {
+        super.readAdditionalSaveData(tag);
         this.ticksAlive = tag.getInt("Age");
         if (tag.contains("Damage")) {
             this.entityData.set(DATA_DAMAGE, tag.getFloat("Damage"));
@@ -211,7 +224,8 @@ public class BulletEntity extends Entity {
     }
 
     @Override
-    protected void addAdditionalSaveData(CompoundTag tag) {
+    public void addAdditionalSaveData(CompoundTag tag) {
+        // Intentionally skip super to avoid writing arrow-specific NBT
         tag.putInt("Age", this.ticksAlive);
         tag.putFloat("Damage", this.entityData.get(DATA_DAMAGE));
     }
