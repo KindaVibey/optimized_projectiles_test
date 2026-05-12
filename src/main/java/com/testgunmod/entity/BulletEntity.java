@@ -8,80 +8,68 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.util.Mth;
-import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.*;
 
 import java.util.List;
 
-public class BulletEntity extends Entity {
+public class BulletEntity extends Projectile {
 
     private static final EntityDataAccessor<Float> DATA_DAMAGE =
             SynchedEntityData.defineId(BulletEntity.class, EntityDataSerializers.FLOAT);
 
-    private static final EntityDataAccessor<Integer> DATA_AGE =
-            SynchedEntityData.defineId(BulletEntity.class, EntityDataSerializers.INT);
+    public static final double AIR_DRAG  = 0.99;
+
+    public static final double GRAVITY   = 0.015;
+
+    public static final double COLLISION_MARGIN = 0.10;
+
+    public static final int MAX_LIFETIME_TICKS = 1200;
 
     private int ticksAlive = 0;
-    private AABB cachedSearchBox;
 
-    private boolean firstClientTick = false;
+    private AABB cachedSearchBox = null;
 
-    private static final double AIR_DRAG = 0.99;
-    private static final double GRAVITY = 0.015;
+    private Vec3 spawnVelocity = null;
 
-    private static final double COLLISION_MARGIN = 0.10;
-
-    private static final int MAX_LIFETIME_TICKS = 1200;
-
-    public BulletEntity(EntityType<?> type, Level level) {
+    public BulletEntity(EntityType<? extends BulletEntity> type, Level level) {
         super(type, level);
         this.noCulling = true;
     }
 
-    public BulletEntity(EntityType<?> type, Level level, Vec3 position, Vec3 velocity, float damage) {
+    public BulletEntity(EntityType<? extends BulletEntity> type, Level level,
+                        Vec3 position, Vec3 velocity, float damage) {
         this(type, level);
         this.setPos(position.x, position.y, position.z);
         this.setDeltaMovement(velocity);
         this.updateRotation();
         this.entityData.set(DATA_DAMAGE, damage);
-        this.entityData.set(DATA_AGE, 0);
         this.setNoGravity(true);
     }
 
     @Override
     protected void defineSynchedData() {
         this.entityData.define(DATA_DAMAGE, 10.0f);
-        this.entityData.define(DATA_AGE, 0);
     }
 
     @Override
     public void tick() {
-        super.tick();
-
-        if (this.level().isClientSide && firstClientTick) {
-            firstClientTick = false;
-            ticksAlive++;
-            this.entityData.set(DATA_AGE, ticksAlive);
-            return;
-        }
+        this.baseTick();
 
         if (++ticksAlive > MAX_LIFETIME_TICKS) {
             this.discard();
             return;
         }
 
-        if (!this.level().isClientSide) {
-            this.entityData.set(DATA_AGE, ticksAlive);
-        }
-
-        Vec3 motion = this.getDeltaMovement();
+        Vec3 motion     = this.getDeltaMovement();
         Vec3 currentPos = this.position();
-
-        Vec3 nextPos = currentPos.add(motion);
+        Vec3 nextPos    = currentPos.add(motion);
 
         if (!this.level().isClientSide) {
             BlockHitResult blockHit = this.level().clip(new ClipContext(
@@ -96,65 +84,44 @@ public class BulletEntity extends Entity {
                 return;
             }
 
-            if (cachedSearchBox == null) {
-                cachedSearchBox = new AABB(currentPos, nextPos).inflate(COLLISION_MARGIN);
-            } else {
-                double minX = Math.min(currentPos.x, nextPos.x) - COLLISION_MARGIN;
-                double minY = Math.min(currentPos.y, nextPos.y) - COLLISION_MARGIN;
-                double minZ = Math.min(currentPos.z, nextPos.z) - COLLISION_MARGIN;
-                double maxX = Math.max(currentPos.x, nextPos.x) + COLLISION_MARGIN;
-                double maxY = Math.max(currentPos.y, nextPos.y) + COLLISION_MARGIN;
-                double maxZ = Math.max(currentPos.z, nextPos.z) + COLLISION_MARGIN;
-                cachedSearchBox = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
-            }
+            updateCachedSearchBox(currentPos, nextPos);
 
-            List<Entity> entities = this.level().getEntities(this, cachedSearchBox,
-                    e -> e.isAlive() && e.isPickable());
+            List<Entity> nearby = this.level().getEntities(
+                    this, cachedSearchBox,
+                    e -> e.isAlive() && e.isPickable()
+            );
 
-            if (!entities.isEmpty()) {
-                Entity target = entities.get(0);
-
+            if (!nearby.isEmpty()) {
+                Entity target = nearby.get(0);
                 if (cachedSearchBox.intersects(target.getBoundingBox())) {
-                    float damage = this.entityData.get(DATA_DAMAGE);
-                    target.hurt(this.damageSources().mobProjectile(this, null), damage);
+                    float dmg = this.entityData.get(DATA_DAMAGE);
+                    target.hurt(this.damageSources().mobProjectile(this, null), dmg);
                     this.discard();
                     return;
                 }
             }
         }
-
         this.setPos(nextPos.x, nextPos.y, nextPos.z);
 
-        Vec3 newMotion = new Vec3(
+        this.setDeltaMovement(
                 motion.x * AIR_DRAG,
                 motion.y - GRAVITY,
                 motion.z * AIR_DRAG
         );
-        this.setDeltaMovement(newMotion);
 
         this.updateRotation();
     }
 
-    private void updateRotation() {
+    @Override
+    protected void updateRotation() {
         Vec3 motion = this.getDeltaMovement();
-        double horizontalDist = motion.horizontalDistance();
-
-        if (horizontalDist > 0.001) {
-            this.setYRot((float)(Mth.atan2(motion.x, motion.z) * 57.2957795));
-            this.setXRot((float)(Mth.atan2(motion.y, horizontalDist) * 57.2957795));
-
+        double hDist = motion.horizontalDistance();
+        if (hDist > 0.001) {
+            this.setYRot((float) (Mth.atan2(motion.x, motion.z) * Mth.RAD_TO_DEG));
+            this.setXRot((float) (Mth.atan2(motion.y, hDist)   * Mth.RAD_TO_DEG));
             this.yRotO = this.getYRot();
             this.xRotO = this.getXRot();
         }
-    }
-
-    @Override
-    public void checkDespawn() {
-    }
-
-    @Override
-    public boolean shouldRenderAtSqrDistance(double distance) {
-        return true;
     }
 
     @Override
@@ -164,7 +131,7 @@ public class BulletEntity extends Entity {
 
     @Override
     public void recreateFromPacket(ClientboundAddEntityPacket packet) {
-        super.recreateFromPacket(packet);
+        this.setPos(packet.getX(), packet.getY(), packet.getZ());
 
         double vx = packet.getXa();
         double vy = packet.getYa();
@@ -172,9 +139,31 @@ public class BulletEntity extends Entity {
         this.setDeltaMovement(vx, vy, vz);
         this.updateRotation();
 
-        if (this.level().isClientSide) {
-            this.firstClientTick = true;
+        this.ticksAlive = 0;
+        this.cachedSearchBox = null;
+    }
+
+    private void updateCachedSearchBox(Vec3 from, Vec3 to) {
+        double minX = Math.min(from.x, to.x) - COLLISION_MARGIN;
+        double minY = Math.min(from.y, to.y) - COLLISION_MARGIN;
+        double minZ = Math.min(from.z, to.z) - COLLISION_MARGIN;
+        double maxX = Math.max(from.x, to.x) + COLLISION_MARGIN;
+        double maxY = Math.max(from.y, to.y) + COLLISION_MARGIN;
+        double maxZ = Math.max(from.z, to.z) + COLLISION_MARGIN;
+
+        if (cachedSearchBox == null) {
+            cachedSearchBox = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+        } else {
+            cachedSearchBox = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
         }
+    }
+
+    @Override
+    public void checkDespawn() {}
+
+    @Override
+    public boolean shouldRenderAtSqrDistance(double distance) {
+        return true;
     }
 
     @Override
@@ -182,23 +171,12 @@ public class BulletEntity extends Entity {
         return false;
     }
 
-    @Override
-    public boolean isPickable() {
-        return false;
-    }
+    @Override public boolean isPickable()        { return false; }
+    @Override public boolean isPushable()        { return false; }
+    @Override public boolean canBeCollidedWith() { return false; }
 
     @Override
-    public boolean isPushable() {
-        return false;
-    }
-
-    @Override
-    public boolean canBeCollidedWith() {
-        return false;
-    }
-
-    @Override
-    protected float getEyeHeight(net.minecraft.world.entity.Pose pose, net.minecraft.world.entity.EntityDimensions dimensions) {
+    protected float getEyeHeight(Pose pose, EntityDimensions dimensions) {
         return 0.0f;
     }
 
@@ -214,5 +192,18 @@ public class BulletEntity extends Entity {
     protected void addAdditionalSaveData(CompoundTag tag) {
         tag.putInt("Age", this.ticksAlive);
         tag.putFloat("Damage", this.entityData.get(DATA_DAMAGE));
+    }
+
+
+    public float getDamage() {
+        return this.entityData.get(DATA_DAMAGE);
+    }
+
+    public void setDamage(float damage) {
+        this.entityData.set(DATA_DAMAGE, damage);
+    }
+
+    public int getTicksAlive() {
+        return ticksAlive;
     }
 }

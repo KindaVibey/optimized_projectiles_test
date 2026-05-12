@@ -22,14 +22,12 @@ public class GunItem extends Item {
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         ItemStack itemStack = player.getItemInHand(hand);
 
+        Vec3 lookVec  = player.getLookAngle();
+        Vec3 velocity = lookVec.scale(2.5);
+        Vec3 eyePos   = player.getEyePosition(1.0f);
+        Vec3 spawnPos = eyePos.add(lookVec);
+
         if (!level.isClientSide) {
-            Vec3 lookVec = player.getLookAngle();
-
-            Vec3 velocity = lookVec.scale(2.5);
-
-            Vec3 eyePos = player.getEyePosition(1.0f);
-            Vec3 spawnPos = eyePos.add(lookVec.scale(1.0f));
-
             BulletEntity bullet = new BulletEntity(
                     ModEntityTypes.BULLET.get(),
                     level,
@@ -44,8 +42,7 @@ public class GunItem extends Item {
                     SoundEvents.GENERIC_EXPLODE, SoundSource.PLAYERS, 0.5f, 1.5f);
 
             player.getCooldowns().addCooldown(this, 10);
-
-            itemStack.hurtAndBreak(1, player, (p) -> p.broadcastBreakEvent(hand));
+            itemStack.hurtAndBreak(1, player, p -> p.broadcastBreakEvent(hand));
         }
 
         return InteractionResultHolder.success(itemStack);
